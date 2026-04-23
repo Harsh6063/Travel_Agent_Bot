@@ -1,0 +1,22 @@
+# Core
+pandas
+numpy
+
+# NLP / Embeddings
+sentence-transformers
+transformers
+torch
+
+# Vector Search
+faiss-cpu
+
+# API / Backend (optional)
+fastapi
+uvicorn
+
+# UI (optional but recommended)
+streamlit
+
+# Utilities
+scikit-learn
+tqdm

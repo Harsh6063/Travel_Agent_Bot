@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "airbnb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@openbnb/mcp-server-airbnb",
+        "--ignore-robots-txt"
+      ]
+    },
+    "weather": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@dangahagan/weather-mcp"
+      ]
+    },
+    "maps": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-google-maps"
+      ]
+    }
+  }
+}
