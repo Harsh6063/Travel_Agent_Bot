@@ -11,20 +11,21 @@ from mcp import ClientSession
 from embeddings import search_destinations
 
 # -----------------------------
-# ENV + LLM (From Code 1)
+# 1. SETUP & LLM (Groq)
 # -----------------------------
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def generate_explanation(query, results):
+    """Uses Groq to explain why the results match the user's intent."""
     try:
         prompt = f"""
-        User query: {query}
+        User Query: {query}
         Travel Data: {results}
 
-        As a travel expert, briefly explain why these options are good. 
-        Mention weather and stays specifically if they are provided. 
-        Keep it professional and concise.
+        As an expert travel agent, briefly explain why these 3 destinations are perfect.
+        - Mention the specific weather conditions and stay options found.
+        - Keep the tone helpful and concise (max 4 sentences).
         """
         res = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -32,24 +33,10 @@ def generate_explanation(query, results):
         )
         return res.choices[0].message.content.strip()
     except:
-        return "These are excellent travel options tailored to your preferences."
+        return "These destinations are top-rated picks based on your interests."
 
 # -----------------------------
-# GEO
-# -----------------------------
-geo = Nominatim(user_agent="travel_agent")
-
-def get_coordinates(place, state):
-    try:
-        loc = geo.geocode(f"{place}, {state}, India", timeout=3)
-        if loc:
-            return float(loc.latitude), float(loc.longitude)
-    except:
-        pass
-    return 20.5937, 78.9629
-
-# -----------------------------
-# MCP CONFIG
+# 2. CONFIGS & GEO
 # -----------------------------
 AIRBNB_CONFIG = StdioServerParameters(
     command="npx",
@@ -61,29 +48,35 @@ WEATHER_CONFIG = StdioServerParameters(
     args=["-y", "@dangahagan/weather-mcp"]
 )
 
+geo = Nominatim(user_agent="travel_agent_pro")
+
+def get_coordinates(place, state):
+    try:
+        loc = geo.geocode(f"{place}, {state}, India", timeout=5)
+        if loc: return float(loc.latitude), float(loc.longitude)
+    except: pass
+    return 20.5937, 78.9629  # Default to India center
+
 # -----------------------------
-# MCP CALL
+# 3. HELPERS (Filtering & Safety)
 # -----------------------------
 async def call_mcp(config, tool, params):
+    """Standardized MCP Tool caller."""
     async with stdio_client(config) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             return await session.call_tool(tool, params)
 
-# -----------------------------
-# HELPERS (From Code 2)
-# -----------------------------
-async def safe_call(func, *args, timeout=10): # Increased timeout for reliability
+async def safe_call(func, *args, timeout=12):
+    """Prevents the entire agent from crashing if one tool fails."""
     try:
         return await asyncio.wait_for(func(*args), timeout)
     except Exception as e:
-        print(f"⚠️ Tool Error: {e}")
+        print(f"⚠️ Tool Alert ({args[0] if args else ''}): {e}")
         return None
 
-def clean_text(value):
-    return value.replace("**", "").strip() if value else "N/A"
-
 def extract_price_and_nights(price_str):
+    """Parses '₹15,000 for 5 nights' -> (15000, 5)."""
     price_match = re.search(r"₹([\d,]+)", price_str)
     nights_match = re.search(r"for (\d+) nights", price_str)
     if not price_match: return 0, 1
@@ -92,17 +85,18 @@ def extract_price_and_nights(price_str):
     return total, nights
 
 def filter_by_budget(results, budget):
+    """Filters Airbnb results by price per night."""
     filtered = []
     for r in results:
         total, nights = extract_price_and_nights(r["price"])
         per_night = total / nights
-        if budget == "low" and per_night <= 2500: filtered.append(r)
-        elif budget == "medium" and 2500 < per_night <= 6000: filtered.append(r)
-        elif budget == "high" and per_night > 6000: filtered.append(r)
+        if budget == "low" and per_night <= 3000: filtered.append(r)
+        elif budget == "medium" and 3000 < per_night <= 8000: filtered.append(r)
+        elif budget == "high" and per_night > 8000: filtered.append(r)
     return filtered if filtered else results
 
 # -----------------------------
-# TOOLS (From Code 2 logic)
+# 4. TOOLS
 # -----------------------------
 async def tool_airbnb(place, state, budget):
     try:
@@ -135,66 +129,74 @@ async def tool_weather(place, state):
             return m.group(1) if m else None
 
         high, low = safe_search(r"High (\d+)°F"), safe_search(r"Low (\d+)°F")
-        if high and low:
-            temp = f"{round((int(high)-32)*5/9)}°C / {round((int(low)-32)*5/9)}°C"
-        else: temp = "N/A"
-
+        temp = f"{round((int(high)-32)*5/9)}°C / {round((int(low)-32)*5/9)}°C" if high and low else "N/A"
+        
         return {
             "temp": temp,
-            "condition": clean_text(safe_search(r"Conditions:\s*(.*)")),
-            "wind": clean_text(safe_search(r"Wind:\s*(.*)"))
+            "condition": (safe_search(r"Conditions:\s*(.*)") or "N/A").replace("**", ""),
+            "rain": safe_search(r"Precipitation Chance:\s*(\d+)%") or "0"
         }
     except: return {}
 
 # -----------------------------
-# MAIN AGENT (Optimized)
+# 5. AGENT ENGINE
 # -----------------------------
 async def travel_agent(query, budget):
-    q = query.lower()
-    tools_needed = {
-        "weather": any(w in q for w in ["weather", "temp", "climate"]),
-        "stays": any(w in q for w in ["stay", "hotel", "airbnb"])
-    }
+    print(f"🧠 Processing Query: {query} (Budget: {budget})")
+    
+    # Check if tools are actually needed
+    q_lower = query.lower()
+    needs_weather = any(w in q_lower for w in ["weather", "temp", "climate"])
+    needs_stays = any(w in q_lower for w in ["stay", "hotel", "airbnb"])
 
     destinations = search_destinations(query)
-    
-    # Fallback if search fails
     if destinations.empty:
-        import pandas as pd
-        destinations = pd.DataFrame([
-            {"Destination Name": "Goa", "State": "Goa", "Category": "Beach"},
-            {"Destination Name": "Manali", "State": "Himachal Pradesh", "Category": "Nature"}
-        ])
+        return [], "No matching destinations found."
 
-    final_results = []
-
+    results = []
+    # Process top 3 destinations
     for _, row in destinations.head(3).iterrows():
         place, state = row["Destination Name"], row["State"]
         item = {"Destination": place, "Category": row["Category"]}
 
-        # Parallelize tool calls for speed
+        # Parallel Tool Calling (Faster)
         tasks = []
-        if tools_needed["weather"]:
-            tasks.append(safe_call(tool_weather, place, state))
-        else:
-            tasks.append(asyncio.sleep(0, result=None))
+        tasks.append(safe_call(tool_weather, place, state) if needs_weather else asyncio.sleep(0))
+        tasks.append(safe_call(tool_airbnb, place, state, budget) if needs_stays else asyncio.sleep(0))
 
-        if tools_needed["stays"]:
-            tasks.append(safe_call(tool_airbnb, place, state, budget))
-        else:
-            tasks.append(asyncio.sleep(0, result=None))
-
-        weather_res, stays_res = await asyncio.gather(*tasks)
+        weather_data, stays_data = await asyncio.gather(*tasks)
         
-        if weather_res: item["Weather"] = weather_res
-        if stays_res: item["Stays"] = stays_res
+        if weather_res := weather_data: item["Weather"] = weather_res
+        if stays_res := stays_data: item["Stays"] = stays_res
         
-        final_results.append(item)
+        results.append(item)
 
-    # Use Groq (Llama 3) for the final smart explanation
-    explanation = generate_explanation(query, final_results)
+    # Final logic: Output generation
+    explanation = generate_explanation(query, results)
     
-    return final_results, explanation
+    # Format the terminal output nicely
+    output_text = f"\n{explanation}\n"
+    for r in results:
+        output_text += f"\n📍 {r['Destination']} ({r['Category']})"
+        if "Weather" in r:
+            w = r["Weather"]
+            output_text += f"\n   🌦️ {w.get('temp')} | {w.get('condition')} | {w.get('rain')}% Rain"
+        if "Stays" in r:
+            output_text += "\n   🏨 Top Stays:"
+            for s in r["Stays"][:2]:
+                output_text += f"\n      - {s['name']} ({s['price']})"
+        output_text += "\n"
 
-async def run_agent(query, budget, memory):
+    return results, output_text
+
+# -----------------------------
+# FASTAPI / RUNNER
+# -----------------------------
+async def run_agent(query, budget, memory=None):
     return await travel_agent(query, budget)
+
+if __name__ == "__main__":
+    q = input("What kind of trip are you looking for? ")
+    b = input("Budget (low/medium/high): ")
+    _, final_msg = asyncio.run(run_agent(q, b))
+    print(final_msg)
