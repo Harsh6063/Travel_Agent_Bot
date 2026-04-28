@@ -1,0 +1,104 @@
+# -----------------------------
+# PYTHON
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*.so
+
+# Virtual environments
+venv/
+.env/
+.env.*
+.venv/
+venv/
+.venv/
+# Python build files
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# -----------------------------
+# ENV FILES (IMPORTANT)
+# -----------------------------
+.env
+.env.local
+.env.*.local
+
+# -----------------------------
+# DATA FILES (BIG FILES)
+# -----------------------------
+*.csv
+*.xlsx
+*.parquet
+*.pkl
+*.joblib
+
+# If you want to keep small sample data:
+# !data/sample.csv
+
+# -----------------------------
+# FAISS / EMBEDDINGS
+# -----------------------------
+*.index
+*.faiss
+*.npy
+
+# -----------------------------
+# MCP / CACHE / TEMP
+# -----------------------------
+.cache/
+tmp/
+temp/
+
+# -----------------------------
+# NODE / NEXT.JS FRONTEND
+# -----------------------------
+node_modules/
+.next/
+out/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------
+# OS FILES
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# IDE / EDITOR
+# -----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -----------------------------
+# TEST / COVERAGE
+# -----------------------------
+.coverage
+htmlcov/
+.pytest_cache/
+
+
+
+# -----------------------------
+# MISC
+# -----------------------------
+*.bak
+*.tmp
+
+torch_cpu.dll
