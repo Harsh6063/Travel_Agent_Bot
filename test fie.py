@@ -15,7 +15,7 @@ AIRBNB_CONFIG = StdioServerParameters(
 
 WEATHER_CONFIG = StdioServerParameters(
     command="npx",
-    args=["-y", "@dangahagan/weather-mcp"]
+    args=["-y", "@dangahagan/weather-mcp@latest"]
 )
 
 # -----------------------------

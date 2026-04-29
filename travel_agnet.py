@@ -11,7 +11,7 @@ from mcp import ClientSession
 from embeddings import search_destinations
 
 # -----------------------------
-# ENV + LLM (From Code 1)
+# ENV + LLM
 # -----------------------------
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -23,7 +23,6 @@ def generate_explanation(query, results):
         Travel Data: {results}
 
         As a travel expert, briefly explain why these options are good. 
-        Mention weather and stays specifically if they are provided. 
         Keep it professional and concise.
         """
         res = client.chat.completions.create(
@@ -41,8 +40,9 @@ geo = Nominatim(user_agent="travel_agent")
 
 def get_coordinates(place, state):
     try:
-        loc = geo.geocode(f"{place}, {state}, India", timeout=3)
+        loc = geo.geocode(f"{place}, {state}, India", timeout=5)
         if loc:
+            # Force to floats - MCP servers require float types
             return float(loc.latitude), float(loc.longitude)
     except:
         pass
@@ -71,9 +71,9 @@ async def call_mcp(config, tool, params):
             return await session.call_tool(tool, params)
 
 # -----------------------------
-# HELPERS (From Code 2)
+# HELPERS 
 # -----------------------------
-async def safe_call(func, *args, timeout=10): # Increased timeout for reliability
+async def safe_call(func, *args, timeout=12):
     try:
         return await asyncio.wait_for(func(*args), timeout)
     except Exception as e:
@@ -81,7 +81,8 @@ async def safe_call(func, *args, timeout=10): # Increased timeout for reliabilit
         return None
 
 def clean_text(value):
-    return value.replace("**", "").strip() if value else "N/A"
+    if not value: return "N/A"
+    return value.replace("**", "").strip()
 
 def extract_price_and_nights(price_str):
     price_match = re.search(r"₹([\d,]+)", price_str)
@@ -96,18 +97,18 @@ def filter_by_budget(results, budget):
     for r in results:
         total, nights = extract_price_and_nights(r["price"])
         per_night = total / nights
-        if budget == "low" and per_night <= 2500: filtered.append(r)
-        elif budget == "medium" and 2500 < per_night <= 6000: filtered.append(r)
-        elif budget == "high" and per_night > 6000: filtered.append(r)
+        if budget == "low" and per_night <= 3000: filtered.append(r)
+        elif budget == "medium" and 3000 < per_night <= 8000: filtered.append(r)
+        elif budget == "high" and per_night > 8000: filtered.append(r)
     return filtered if filtered else results
 
 # -----------------------------
-# TOOLS (From Code 2 logic)
+# TOOLS (Weather Logic Fixed)
 # -----------------------------
 async def tool_airbnb(place, state, budget):
     try:
         raw = await call_mcp(AIRBNB_CONFIG, "airbnb_search", 
-                             {"location": f"{place}, {state}, India", "adults": 2})
+                               {"location": f"{place}, {state}, India", "adults": 2})
         data = json.loads(raw.content[0].text)
         stays = []
         for item in data.get("searchResults", [])[:5]:
@@ -124,30 +125,37 @@ async def tool_airbnb(place, state, budget):
 async def tool_weather(place, state):
     try:
         lat, lon = get_coordinates(place, state)
-        raw = await call_mcp(WEATHER_CONFIG, "get_forecast", {"latitude": lat, "longitude": lon})
-        text = raw.content[0].text
-        parts = text.split("##")
-        if len(parts) < 2: return {}
-        today = parts[1]
+        raw = await call_mcp(WEATHER_CONFIG, "get_forecast", 
+                             {"latitude": lat, "longitude": lon})
         
+        if not raw or not raw.content: return {}
+        text = raw.content[0].text
+
+        # Improved Regex to catch values even without '##' formatting
         def safe_search(pat):
-            m = re.search(pat, today)
+            m = re.search(pat, text, re.IGNORECASE)
             return m.group(1) if m else None
 
-        high, low = safe_search(r"High (\d+)°F"), safe_search(r"Low (\d+)°F")
+        high = safe_search(r"High:?\s*(\d+)°F")
+        low = safe_search(r"Low:?\s*(\d+)°F")
+        cond = safe_search(r"Conditions:?\s*(.*)")
+        rain = safe_search(r"Precipitation Chance:?\s*(\d+)%")
+
         if high and low:
             temp = f"{round((int(high)-32)*5/9)}°C / {round((int(low)-32)*5/9)}°C"
         else: temp = "N/A"
 
         return {
             "temp": temp,
-            "condition": clean_text(safe_search(r"Conditions:\s*(.*)")),
-            "wind": clean_text(safe_search(r"Wind:\s*(.*)"))
+            "condition": clean_text(cond),
+            "rain": f"{rain}%" if rain else "0%"
         }
-    except: return {}
+    except Exception as e:
+        print(f"Weather tool failed: {e}")
+        return {}
 
 # -----------------------------
-# MAIN AGENT (Optimized)
+# MAIN AGENT
 # -----------------------------
 async def travel_agent(query, budget):
     q = query.lower()
@@ -158,7 +166,6 @@ async def travel_agent(query, budget):
 
     destinations = search_destinations(query)
     
-    # Fallback if search fails
     if destinations.empty:
         import pandas as pd
         destinations = pd.DataFrame([
@@ -172,7 +179,6 @@ async def travel_agent(query, budget):
         place, state = row["Destination Name"], row["State"]
         item = {"Destination": place, "Category": row["Category"]}
 
-        # Parallelize tool calls for speed
         tasks = []
         if tools_needed["weather"]:
             tasks.append(safe_call(tool_weather, place, state))
@@ -191,7 +197,6 @@ async def travel_agent(query, budget):
         
         final_results.append(item)
 
-    # Use Groq (Llama 3) for the final smart explanation
     explanation = generate_explanation(query, final_results)
     
     return final_results, explanation

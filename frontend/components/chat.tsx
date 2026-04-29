@@ -124,15 +124,7 @@ export default function Chat() {
       {/* INPUT BOX */}
       <div className="w-full max-w-3xl p-4 border-t border-gray-800">
         <div className="flex items-center gap-2 bg-gray-900 rounded-xl px-3 py-2">
-          <select
-            value={budget}
-            onChange={(e) => setBudget(e.target.value)}
-            className="bg-gray-800 text-xs p-1 rounded"
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
+          
 
           <input
             className="flex-1 bg-transparent outline-none text-sm"
